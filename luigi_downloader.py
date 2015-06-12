@@ -1,40 +1,60 @@
 from stat import S_ISDIR
 import paramiko
 from os.path import join
-from luigi import luigi
-from luigi.luigi.contrib import sftp
+import luigi
+from luigi.contrib import sftp
+from abc import ABCMeta, abstractmethod
+
+
+
+# from .luigi.luigi.contrib import sftp
+
+
+
+# from .luigi import luigi
+
 ssh = None
 sftpcon = None
+hostname = None
+username = None
+password = None
 
-class Lister(luigi.target):
+class Lister(luigi.Task):
+    __metaclass__ = ABCMeta
+
+    @abstractmethod
     def list_files(self):
         raise NotImplementedError
 
 
 
-class FileTransfer(sftp.SftpTarget):
+class FileTransfer(luigi.Task):
     remote_path = luigi.Parameter()
 
     def input(self):
-        return sftp.SftpTarget(self.remote_path)
+        return sftp.SftpTarget(path=self.remote_path, host=hostname, username=username, password=password)
 
     def output(self):
-        return luigi.LocalTarget()
+        return luigi.LocalTarget("roar.txt")
 
     def run(self):
+        print("Wanting to get {}".format(self.remote_path))
         #TODO Just copy the stuff in the most basic way possible.
         # I bet this is a bad way to do this.
-        out = open(self.output(), 'w')
-        for i in open(self.input(), 'r'):
+        out = self.output().open('w')
+        for i in self.input().open('r'):
             out.write(i)
 
 
 
 class SftpLister(Lister):
 
+    def exists(self):
+        return False
+
     def requires(self):
         # Need to prepend mtime stamp to
-        return [FileTransfer(remote_path=i) for i in self.list_files()]
+        return [FileTransfer(remote_path=i) for i in self.list_files('/home/sftptest/')]
 
 
     def is_dir(self, path):
@@ -50,6 +70,9 @@ class SftpLister(Lister):
         directory_contents = sftpcon.listdir(the_path)
         rtrn = []
         for afile in directory_contents:
+            # ignore hidden for now, maybe allow later. Custom filter somewhere
+            if afile.startswith('.'):
+                continue
             afile = join(the_path, afile)
             if self.is_dir(afile):
                 rtrn.extend(self.list_files(join(the_path, afile)))
@@ -63,7 +86,6 @@ class SftpLister(Lister):
 if __name__ == "__main__":
     import os
 
-    print(os.getcwd())
     with open('sftpcredentials.txt', 'r') as f:
         hostname = f.readline().strip()
         username = f.readline().strip()
@@ -75,9 +97,6 @@ if __name__ == "__main__":
     #     password=password
     # )
 
-    print("hey", "there")
-    print(hostname, username, password)
-
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(hostname=hostname,
@@ -86,5 +105,8 @@ if __name__ == "__main__":
                 port=22)
     sftpcon = ssh.open_sftp()
     a = SftpLister()
-    print('-----')
-    print(a.list_files("/home/sftptest/"))
+    # print('-----')
+    # print(a.list_files("/home/sftptest/"))
+
+
+    luigi.run(["--local-scheduler"], main_task_cls=SftpLister)
